@@ -25,6 +25,8 @@ CREATE TABLE IF NOT EXISTS weather_readings(city TEXT REFERENCES locations, sour
     temp_c REAL NOT NULL, humidity_pct REAL NOT NULL CHECK(humidity_pct BETWEEN 0 AND 100),
     wind_kmh REAL NOT NULL CHECK(wind_kmh>=0), pressure_hpa REAL NOT NULL,
     run_id INTEGER NOT NULL REFERENCES collection_runs, PRIMARY KEY(city,source_utc));
+CREATE TABLE IF NOT EXISTS raw_responses(run_id INTEGER PRIMARY KEY REFERENCES collection_runs,
+    city TEXT NOT NULL REFERENCES locations, source_utc TEXT, body BLOB NOT NULL, sha256 TEXT NOT NULL);
 """
 
 def connect(path):
@@ -67,20 +69,28 @@ def parse(raw):
         raise ValueError("Reading outside plausible range")
     return (stamp,*values)
 
+def now_utc():
+    return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
 def collect(db, city, demo=False, getter=fetch, pause=time.sleep):
+    """Collect one city. Every response body received is kept in raw_responses.
+    collected_utc is the time the response arrived (or the time the attempt failed)."""
     source = "synthetic:demo" if demo else request_url(city)
     for attempt in range(4):
-        stamp = datetime.now(timezone.utc).isoformat(timespec="seconds")
-        digest = None
+        raw = digest = row = None
         try:
             raw = fixture(city) if demo else getter(source)
+            stamp = now_utc()
             digest = hashlib.sha256(raw).hexdigest()
             row = parse(raw)
         except (URLError, TimeoutError, OSError, ValueError, KeyError, TypeError) as exc:
+            stamp = now_utc()
             retry = isinstance(exc, OSError) and attempt < 3
             with db:
-                db.execute("INSERT INTO collection_runs VALUES(NULL,?,?,?,?,?,?)",
-                           (city,stamp,source,digest,"retry" if retry else "error",str(exc)))
+                run = db.execute("INSERT INTO collection_runs VALUES(NULL,?,?,?,?,?,?)",
+                                 (city,stamp,source,digest,"retry" if retry else "error",str(exc))).lastrowid
+                if raw is not None:
+                    db.execute("INSERT INTO raw_responses VALUES(?,?,NULL,?,?)", (run,city,raw,digest))
             if retry:
                 pause(2**attempt)
                 continue
@@ -88,11 +98,17 @@ def collect(db, city, demo=False, getter=fetch, pause=time.sleep):
         with db:
             run = db.execute("INSERT INTO collection_runs VALUES(NULL,?,?,?,?,?,NULL)",
                              (city,stamp,source,digest,"saved")).lastrowid
+            db.execute("INSERT INTO raw_responses VALUES(?,?,?,?,?)", (run,city,row[0],raw,digest))
             added = db.execute("INSERT INTO weather_readings VALUES(?,?,?,?,?,?,?) ON CONFLICT(city,source_utc) DO NOTHING",
                                (city,*row,run)).rowcount
-            if not added:
-                db.execute("UPDATE collection_runs SET status='duplicate' WHERE id=?", (run,))
-        return "saved" if added else "duplicate"
+            if added:
+                return "saved"
+            # Same city and source time seen before: keep the first reading, label this run.
+            first = db.execute("SELECT temp_c,humidity_pct,wind_kmh,pressure_hpa FROM weather_readings WHERE city=? AND source_utc=?",
+                               (city,row[0])).fetchone()
+            status = "duplicate" if tuple(first) == tuple(row[1:]) else "revision"
+            db.execute("UPDATE collection_runs SET status=? WHERE id=?", (status,run))
+        return status
 
 def show(db):
     print("City | Source time (UTC) | Temp (C) | Humidity (%) | Wind (km/h) | Pressure (hPa)")
