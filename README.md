@@ -1,30 +1,94 @@
-# Live weather monitoring — Checkpoint 1
+# Live Weather Monitoring and Temperature Trend Analysis
 
-This first milestone demonstrates one collection cycle: request current conditions, validate the response, save it in SQLite, and read it back. Python 3.9+ is sufficient. No packages, accounts, or keys are needed.
+UDE5014CM Data Science for Developers – Assessment 2. Author: Jahongir Odiljanov (UDEA).
 
-## Start in Windows PowerShell
-Extract the ZIP. Open the folder containing weather.py in File Explorer, type powershell in its address bar and press Enter.
+The collector requests Open-Meteo current conditions for Tashkent, Samarkand and Bukhara,
+validates each response, stores it in SQLite and reads it back. Python 3.9 or newer is enough;
+no packages, accounts or API keys are needed.
 
-    py weather.py demo
+Current stage: collection, storage and automation. The dashboard, analysis and prediction
+models are planned work.
 
-The three records are synthetic examples, saved only in demo.sqlite. Repeat the command to see duplicate detection. To read back the saved examples without collecting anything:
+## Run locally (Windows PowerShell)
 
-    py weather.py show-demo
+Open PowerShell in this folder.
 
-## After written approval
-At a scheduled collection time, run:
+    py -3.13 -m unittest -v      # 7 automated tests
+    py -3.13 weather.py demo     # three synthetic examples into demo.sqlite (run twice: duplicates)
+    py -3.13 weather.py show-demo
+    py -3.13 weather.py live     # one live batch into weather.sqlite, then exit
+    py -3.13 weather.py show-live
 
-    py weather.py live
+`live` only collects inside the approved window (below). Outside it, it prints the reason and
+saves nothing.
 
-This requests current conditions separately for Tashkent, Samarkand, and Bukhara. Successful live readings go into weather.sqlite. This command runs once and exits. For the proposed schedule, configure Windows Task Scheduler to run it hourly at 08:00 through 15:00 Tashkent time during the approved 21 days. Keep the computer awake and online. Do not count demonstration data or fill missing hours from an archive.
+## Approved collection plan
 
-    py weather.py show-live
+- Source: Open-Meteo Forecast API, `https://api.open-meteo.com/v1/forecast`, `current` values
+  of temperature_2m (°C), relative_humidity_2m (%), wind_speed_10m (km/h), surface_pressure (hPa),
+  requested in UTC. City coordinates and request settings are fixed in `weather.py`.
+- Window: once per hour, 08:00–15:00 Asia/Tashkent (UTC+5, no daylight saving), for 21 days
+  from `COLLECTION_START` in `weather.py`. A late run is accepted until 15:59 and stored with its
+  real timestamps.
+- One record = one city at one source timestamp. Maximum 504 records; minimum targets are
+  450 unique records, at least 20 days with data, and 300 valid same-city pairs exactly one hour
+  apart (441 possible). Records are not independent observations.
+- Open-Meteo values are model-derived estimates, not independent station measurements.
 
-The output shows the 12 most recent readings. The database keeps all accepted readings. The pair (city, source time) is unique. Each run records its own collection time, request URL, response hash when available, and status. Network failures are retried up to three times. Invalid responses are logged and excluded.
+## Database (SQLite)
 
-## Verify and explain
-    py -m unittest -v
+- `locations` – the three cities and their fixed coordinates.
+- `collection_runs` – one row per attempt: city, `collected_utc` (when the response arrived or
+  the attempt failed), request URL, response SHA-256, status and error. Statuses: `saved`,
+  `duplicate` (same values already stored), `revision` (same city and source time but different
+  values), `retry`, `error`.
+- `weather_readings` – accepted readings, unique on (city, source_utc). The first accepted
+  values are kept; a revision never replaces them and never counts as a new record.
+- `raw_responses` – the exact body of every response received, including rejected ones and
+  revisions.
 
-The tests exercise persistence and duplicates across cities, invalid readings, and recovery from a connection failure. The collector and tests are the starting point for your checkpoint, not a completed final submission. After approval, retain evidence of a genuine live collection and retrieval, commit the working version to your coursework repository, and record the commit and material assistance in your development log.
+Data rules: demonstration data stays in `demo.sqlite`; only live API records count. Readings are
+never invented, backdated, or filled from a historical download. Failed requests and missed
+hours stay visible in `collection_runs`.
 
-Source: Open-Meteo Weather Forecast API, https://open-meteo.com/en/docs . Model-derived current conditions are provided by Open-Meteo; see https://open-meteo.com/en/terms for attribution and licence terms. This milestone does not train prediction models.
+## Automation with GitHub Actions
+
+The approved proposal described running the collector on a laptop. Collection is automated with
+GitHub Actions instead (`.github/workflows/collect.yml`), using the same `weather.py`.
+
+- Schedule: minutes 1, 6 and 11 of every hour 03:00–10:00 UTC (08:00–15:00 Tashkent). GitHub
+  does not guarantee scheduled start times, so several triggers are used. Each city is saved at
+  most once per Tashkent hour; later triggers only retry a city that is still missing.
+- Storage: the runner's disk is temporary, so after each run the workflow commits the database to
+  its own branch: `weather.sqlite` on `data` (assessed), `demo.sqlite` on `data-demo` (tests).
+  Each commit is a dated record of a run.
+- Only one run at a time (concurrency group), so runs cannot overwrite each other.
+- If one city fails, the other readings are still saved and the run is marked failed.
+- Runner fixed to `ubuntu-24.04` and Python 3.13 for the whole collection period.
+- Manual runs: Actions tab → Collect weather → Run workflow (mode `demo` or `live`).
+
+### Download the live database to this laptop
+
+    git fetch origin data
+    git restore --source=origin/data -- weather.sqlite
+    py -3.13 weather.py show-live
+
+Use `git restore`, not `git show ... > file`: PowerShell redirection would damage the binary file.
+`weather.sqlite` is ignored on `main` so the copy is never committed there.
+
+### Starting and ending collection
+
+Assessed collection starts with the commit that sets `COLLECTION_START = date(YYYY, M, D)`.
+Day 21 is `COLLECTION_START` + 20 days; after it, `live` refuses to collect. Record the actual
+start and end dates and commit hashes in the development log, then disable the workflow
+(Actions → Collect weather → ⋯ → Disable workflow).
+
+## Data source and licence
+
+Weather data by Open-Meteo.com (https://open-meteo.com/). API data are licensed under
+CC BY 4.0 (https://open-meteo.com/en/licence; licence text https://creativecommons.org/licenses/by/4.0/).
+Open-Meteo is free for non-commercial use (https://open-meteo.com/en/terms).
+Citation: Zippenfenig, P. (2023). Open-Meteo.com Weather API [Computer software]. Zenodo.
+https://doi.org/10.5281/ZENODO.7970649 Transformations: values are stored as returned; responses are
+validated (units, timestamp format, plausible ranges) and invalid ones are excluded from
+`weather_readings` but kept in `raw_responses`.
