@@ -20,7 +20,7 @@ API = "https://api.open-meteo.com/v1/forecast"
 # Assessed collection window (approved plan). Uzbekistan uses UTC+5 all year (no daylight saving),
 # so a fixed offset is exact and needs no extra package on Windows.
 TASHKENT = timezone(timedelta(hours=5), "Asia/Tashkent")
-COLLECTION_START = None   # Set to date(YYYY, M, D) in the commit that starts assessed collection.
+COLLECTION_START = date(2026, 11, 1)   # Assessed collection: 1-21 Nov 2026 (Tashkent dates).
 COLLECTION_DAYS = 21
 COLLECTION_HOURS = range(8, 16)   # slots 08:00 ... 15:00; a late start within the same hour still counts
 SCHEMA = """
