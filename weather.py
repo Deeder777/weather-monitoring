@@ -6,7 +6,7 @@ import math
 import sqlite3
 import sys
 import time
-from datetime import datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from urllib.parse import urlencode
 from urllib.request import urlopen
@@ -16,6 +16,13 @@ ROOT = Path(__file__).resolve().parent
 CITIES = {"Tashkent": (41.31, 69.28), "Samarkand": (39.65, 66.96), "Bukhara": (39.77, 64.42)}
 UNITS = {"temperature_2m": "°C", "relative_humidity_2m": "%", "wind_speed_10m": "km/h", "surface_pressure": "hPa"}
 API = "https://api.open-meteo.com/v1/forecast"
+
+# Assessed collection window (approved plan). Uzbekistan uses UTC+5 all year (no daylight saving),
+# so a fixed offset is exact and needs no extra package on Windows.
+TASHKENT = timezone(timedelta(hours=5), "Asia/Tashkent")
+COLLECTION_START = None   # Set to date(YYYY, M, D) in the commit that starts assessed collection.
+COLLECTION_DAYS = 21
+COLLECTION_HOURS = range(8, 16)   # slots 08:00 ... 15:00; a late start within the same hour still counts
 SCHEMA = """
 PRAGMA foreign_keys=ON;
 CREATE TABLE IF NOT EXISTS locations(city TEXT PRIMARY KEY, latitude REAL, longitude REAL);
@@ -110,6 +117,36 @@ def collect(db, city, demo=False, getter=fetch, pause=time.sleep):
             db.execute("UPDATE collection_runs SET status=? WHERE id=?", (status,run))
         return status
 
+def window_problem(now):
+    """Return a reason if `now` (aware datetime) is outside the approved window, else None."""
+    if COLLECTION_START is None:
+        return "Assessed collection has not started: COLLECTION_START is not set."
+    local = now.astimezone(TASHKENT)
+    end = COLLECTION_START + timedelta(days=COLLECTION_DAYS - 1)
+    if not COLLECTION_START <= local.date() <= end:
+        return f"Outside collection dates {COLLECTION_START} to {end} (Tashkent date {local.date()})."
+    if local.hour not in COLLECTION_HOURS:
+        return f"Outside collection hours 08:00-15:59 Tashkent (now {local:%H:%M})."
+    return None
+
+def collected_this_hour(db, city, now):
+    """True if this city already has a saved reading from a run in the same Tashkent clock hour."""
+    start = now.astimezone(TASHKENT).replace(minute=0, second=0, microsecond=0).astimezone(timezone.utc)
+    lo, hi = start.isoformat(timespec="seconds"), (start + timedelta(hours=1)).isoformat(timespec="seconds")
+    return db.execute("SELECT 1 FROM collection_runs WHERE city=? AND status='saved' AND collected_utc>=? AND collected_utc<?",
+                      (city, lo, hi)).fetchone() is not None
+
+def run_live(db, now, getter=fetch, pause=time.sleep):
+    """One scheduled live batch. Cities already saved this hour are skipped, so overlapping or
+    repeated runs cannot add extra records; a city that failed earlier in the hour is retried."""
+    results = {}
+    for city in CITIES:
+        if collected_this_hour(db, city, now):
+            results[city] = "skipped (already collected this hour)"
+        else:
+            results[city] = collect(db, city, getter=getter, pause=pause)
+    return results
+
 def show(db):
     print("City | Source time (UTC) | Temp (C) | Humidity (%) | Wind (km/h) | Pressure (hPa)")
     for row in db.execute("SELECT city,source_utc,temp_c,humidity_pct,wind_kmh,pressure_hpa FROM weather_readings ORDER BY source_utc DESC,city LIMIT 12"):
@@ -120,16 +157,25 @@ def main():
     parser.add_argument("action",choices=["demo","live","show-demo","show-live"])
     args = parser.parse_args()
     demo = "demo" in args.action
+    if args.action == "live":
+        problem = window_problem(datetime.now(timezone.utc))
+        if problem:
+            print("No live collection: " + problem)
+            return 0
     db = connect(ROOT / ("demo.sqlite" if demo else "weather.sqlite"))
     try:
         failed = False
-        if args.action in ("demo","live"):
-            for city in CITIES:
-                status = collect(db,city,demo)
-                print(city + ": " + status)
-                failed |= status == "error"
-                if status == "error":
-                    print(db.execute("SELECT error FROM collection_runs WHERE city=? ORDER BY id DESC LIMIT 1",(city,)).fetchone()[0], file=sys.stderr)
+        if args.action == "demo":
+            results = {city: collect(db,city,True) for city in CITIES}
+        elif args.action == "live":
+            results = run_live(db, datetime.now(timezone.utc))
+        else:
+            results = {}
+        for city, status in results.items():
+            print(city + ": " + status)
+            if status == "error":
+                failed = True
+                print(db.execute("SELECT error FROM collection_runs WHERE city=? ORDER BY id DESC LIMIT 1",(city,)).fetchone()[0], file=sys.stderr)
         print("DEMO / synthetic readings" if demo else "Live collection / Open-Meteo")
         show(db)
         return int(failed)

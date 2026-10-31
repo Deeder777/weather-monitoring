@@ -1,5 +1,6 @@
 import json
 import unittest
+from datetime import date, datetime, timezone
 from urllib.error import URLError
 import weather as w
 
@@ -48,6 +49,34 @@ class CollectorTests(unittest.TestCase):
         self.assertEqual(w.collect(self.db,"Tashkent",getter=lambda url:json.dumps(changed).encode()),"revision")
         self.assertEqual(self.db.execute("SELECT temp_c FROM weather_readings").fetchall(),[(18,)])
         self.assertEqual(self.db.execute("SELECT count(*) FROM raw_responses").fetchone()[0],2)
+
+    def test_collection_window(self):
+        original = w.COLLECTION_START
+        self.addCleanup(setattr, w, "COLLECTION_START", original)
+        at = lambda d, hour_utc, minute=0: datetime(2026, 11, d, hour_utc, minute, tzinfo=timezone.utc)
+        w.COLLECTION_START = None
+        self.assertIsNotNone(w.window_problem(at(5, 5)))
+        w.COLLECTION_START = date(2026, 11, 5)
+        self.assertIsNone(w.window_problem(at(5, 3)))          # 08:00 Tashkent, day 1
+        self.assertIsNone(w.window_problem(at(25, 10, 40)))    # 15:40 Tashkent, day 21 (late 15:00 run)
+        self.assertIsNotNone(w.window_problem(at(5, 2, 59)))   # 07:59 Tashkent
+        self.assertIsNotNone(w.window_problem(at(5, 11)))      # 16:00 Tashkent
+        self.assertIsNotNone(w.window_problem(at(4, 5)))       # day before start
+        self.assertIsNotNone(w.window_problem(at(26, 5)))      # day 22
+
+    def test_one_batch_per_hour_keeps_partial_success(self):
+        def flaky(url):
+            if "39.77" in url:                                  # Bukhara fails on the first run
+                raise ValueError("server error")
+            return w.fixture("Samarkand" if "39.65" in url else "Tashkent")
+        now = datetime.now(timezone.utc)
+        first = w.run_live(self.db, now, getter=flaky)
+        self.assertEqual(first, {"Tashkent":"saved","Samarkand":"saved","Bukhara":"error"})
+        second = w.run_live(self.db, now, getter=lambda url: w.fixture("Bukhara"))
+        self.assertTrue(second["Tashkent"].startswith("skipped"))
+        self.assertTrue(second["Samarkand"].startswith("skipped"))
+        self.assertEqual(second["Bukhara"], "saved")
+        self.assertEqual(self.db.execute("SELECT count(*) FROM weather_readings").fetchone()[0], 3)
 
 if __name__ == "__main__":
     unittest.main()
