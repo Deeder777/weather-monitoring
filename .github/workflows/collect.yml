@@ -1,0 +1,91 @@
+name: Collect weather
+
+on:
+  schedule:
+    # 08:00-15:00 Tashkent (UTC+5) = 03:00-10:00 UTC. GitHub cron always uses UTC.
+    # Three triggers per hour because GitHub often starts scheduled runs late or drops some.
+    # weather.py saves each city at most once per Tashkent hour, so the later triggers
+    # only collect a city that is still missing in that hour.
+    - cron: "1,6,11 3-10 * * *"
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "demo = test run saved to the data-demo branch; live = assessed collection"
+        type: choice
+        options: [demo, live]
+        default: demo
+
+permissions:
+  contents: write
+
+# Only one collector run at a time, so two runs can never overwrite each other's database.
+concurrency:
+  group: weather-collector
+  cancel-in-progress: false
+
+jobs:
+  collect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      MODE: ${{ github.event_name == 'schedule' && 'live' || inputs.mode }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Choose database file and branch
+        run: |
+          if [ "$MODE" = "live" ]; then
+            echo "DB=weather.sqlite" >> "$GITHUB_ENV"
+            echo "BRANCH=data" >> "$GITHUB_ENV"
+          else
+            echo "DB=demo.sqlite" >> "$GITHUB_ENV"
+            echo "BRANCH=data-demo" >> "$GITHUB_ENV"
+          fi
+
+      - name: Restore the saved database
+        run: |
+          if git ls-remote --exit-code --heads origin "$BRANCH" > /dev/null; then
+            git fetch --depth=1 origin "$BRANCH"
+            git worktree add --detach store FETCH_HEAD
+          else
+            echo "Branch $BRANCH does not exist yet; it will be created."
+            git worktree add --detach store
+            git -C store switch --orphan "$BRANCH"
+          fi
+          if [ -f "store/$DB" ]; then cp "store/$DB" "$DB"; fi
+
+      - name: Run collector
+        id: run
+        run: |
+          set +e
+          python weather.py "$MODE"
+          echo "code=$?" >> "$GITHUB_OUTPUT"
+
+      - name: Save the database to its branch
+        run: |
+          if [ ! -f "$DB" ]; then
+            echo "No database was written (for example, outside the collection window). Nothing to save."
+            exit 0
+          fi
+          cp "$DB" "store/$DB"
+          printf '*.sqlite binary\n' > store/.gitattributes
+          cd store
+          git add "$DB" .gitattributes
+          if git diff --cached --quiet; then
+            echo "Database unchanged. Nothing to save."
+            exit 0
+          fi
+          git -c user.name="github-actions[bot]" \
+              -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
+              commit -m "$MODE run $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          git push origin "HEAD:refs/heads/$BRANCH"
+
+      - name: Mark the run as failed if any city failed
+        if: steps.run.outputs.code != '0'
+        run: |
+          echo "At least one city failed. Readings from the other cities were still saved."
+          exit 1
