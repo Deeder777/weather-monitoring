@@ -90,4 +90,21 @@ humidity and wind per city. Uses all 21 days, because no model is selected from 
 
 ## Amendments
 
-(None yet. Each amendment: date, what changed, why, and whether any test-day result had been seen.)
+(Each amendment: date, what changed, why, and whether any test-day result had been seen.)
+
+### Amendment 1 – 24 Nov 2026: implementation details for Question 3
+
+Added before model selection was run. No model had been fitted or scored on any day, and no
+test-day model result had been seen. Questions 1–2 (descriptive charts and the city comparison)
+had been run as planned.
+
+1. *Hour of day* is encoded as one indicator per input hour (08:00–14:00), not as one number, so
+   that ridge regression is not forced to assume the same warming at every hour. Both models use
+   the same encoding.
+2. *Change since the previous hour* is set to 0 with the indicator = 1 whenever there is no reading
+   exactly 60 minutes earlier for the same city. This is always the case at 08:00 and, after
+   collection gaps, occasionally at other hours. The indicator is therefore named `no_previous`.
+3. Model settings are chosen separately for each feature set, by the same rule (lowest mean MAE
+   across the three validation windows). The chosen settings are committed in
+   `results/q3_selection.json` before the test days are scored, and `models.py test` refuses to run
+   until that file is committed.
