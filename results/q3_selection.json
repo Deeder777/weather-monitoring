@@ -1,0 +1,80 @@
+{
+  "created": "2026-11-24T22:47:04",
+  "seed": 2026,
+  "development_days": [
+    "2026-11-01",
+    "2026-11-16"
+  ],
+  "windows": [
+    {
+      "train": [
+        "2026-11-01",
+        "2026-11-10"
+      ],
+      "validate": [
+        "2026-11-11",
+        "2026-11-12"
+      ]
+    },
+    {
+      "train": [
+        "2026-11-01",
+        "2026-11-12"
+      ],
+      "validate": [
+        "2026-11-13",
+        "2026-11-14"
+      ]
+    },
+    {
+      "train": [
+        "2026-11-01",
+        "2026-11-14"
+      ],
+      "validate": [
+        "2026-11-15",
+        "2026-11-16"
+      ]
+    }
+  ],
+  "chosen": {
+    "full": {
+      "persistence": {
+        "setting": {},
+        "mean_validation_mae": 1.3937
+      },
+      "ridge": {
+        "setting": {
+          "alpha": 0.01
+        },
+        "mean_validation_mae": 0.453
+      },
+      "forest": {
+        "setting": {
+          "max_depth": 5,
+          "min_samples_leaf": 5
+        },
+        "mean_validation_mae": 2.0486
+      }
+    },
+    "temperature_history": {
+      "persistence": {
+        "setting": {},
+        "mean_validation_mae": 1.3937
+      },
+      "ridge": {
+        "setting": {
+          "alpha": 0.01
+        },
+        "mean_validation_mae": 0.4575
+      },
+      "forest": {
+        "setting": {
+          "max_depth": 5,
+          "min_samples_leaf": 5
+        },
+        "mean_validation_mae": 1.9518
+      }
+    }
+  }
+}

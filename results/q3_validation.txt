@@ -1,0 +1,41 @@
+Question 3 - model selection on development days only (1-16 Nov)
+Development pairs: 321. Test days are not read for selection.
+
+== Feature set: full (primary) ==
+model | setting | MAE window 1 | window 2 | window 3 | mean MAE
+persistence | {} | 0.986 | 1.303 | 1.893 | 1.394
+ridge | {"alpha": 0.01} | 0.522 | 0.411 | 0.425 | 0.453
+ridge | {"alpha": 0.1} | 0.528 | 0.411 | 0.426 | 0.455
+ridge | {"alpha": 1} | 0.597 | 0.404 | 0.428 | 0.476
+ridge | {"alpha": 10} | 1.476 | 0.513 | 0.502 | 0.830
+ridge | {"alpha": 100} | 5.000 | 2.295 | 1.283 | 2.860
+forest | {"max_depth": 3, "min_samples_leaf": 5} | 4.479 | 0.914 | 1.529 | 2.307
+forest | {"max_depth": 3, "min_samples_leaf": 10} | 4.830 | 1.037 | 1.493 | 2.454
+forest | {"max_depth": 3, "min_samples_leaf": 20} | 4.891 | 1.365 | 1.474 | 2.577
+forest | {"max_depth": 4, "min_samples_leaf": 5} | 4.164 | 0.874 | 1.201 | 2.080
+forest | {"max_depth": 4, "min_samples_leaf": 10} | 4.761 | 1.070 | 1.325 | 2.385
+forest | {"max_depth": 4, "min_samples_leaf": 20} | 4.891 | 1.363 | 1.447 | 2.567
+forest | {"max_depth": 5, "min_samples_leaf": 5} | 4.135 | 0.848 | 1.163 | 2.049
+forest | {"max_depth": 5, "min_samples_leaf": 10} | 4.761 | 1.069 | 1.323 | 2.384
+forest | {"max_depth": 5, "min_samples_leaf": 20} | 4.891 | 1.363 | 1.447 | 2.567
+Chosen: persistence {} (mean MAE 1.394); ridge {"alpha": 0.01} (mean MAE 0.453); forest {"max_depth": 5, "min_samples_leaf": 5} (mean MAE 2.049)
+
+== Feature set: temperature_history (robustness check 3) ==
+model | setting | MAE window 1 | window 2 | window 3 | mean MAE
+persistence | {} | 0.986 | 1.303 | 1.893 | 1.394
+ridge | {"alpha": 0.01} | 0.522 | 0.410 | 0.440 | 0.458
+ridge | {"alpha": 0.1} | 0.528 | 0.410 | 0.439 | 0.459
+ridge | {"alpha": 1} | 0.590 | 0.407 | 0.432 | 0.476
+ridge | {"alpha": 10} | 1.344 | 0.517 | 0.403 | 0.754
+ridge | {"alpha": 100} | 5.016 | 2.648 | 0.675 | 2.780
+forest | {"max_depth": 3, "min_samples_leaf": 5} | 4.412 | 0.907 | 1.557 | 2.292
+forest | {"max_depth": 3, "min_samples_leaf": 10} | 4.810 | 1.034 | 1.543 | 2.463
+forest | {"max_depth": 3, "min_samples_leaf": 20} | 4.891 | 1.366 | 1.474 | 2.577
+forest | {"max_depth": 4, "min_samples_leaf": 5} | 4.045 | 0.757 | 1.220 | 2.007
+forest | {"max_depth": 4, "min_samples_leaf": 10} | 4.745 | 1.022 | 1.363 | 2.377
+forest | {"max_depth": 4, "min_samples_leaf": 20} | 4.891 | 1.364 | 1.442 | 2.566
+forest | {"max_depth": 5, "min_samples_leaf": 5} | 3.991 | 0.701 | 1.163 | 1.952
+forest | {"max_depth": 5, "min_samples_leaf": 10} | 4.745 | 1.019 | 1.339 | 2.368
+forest | {"max_depth": 5, "min_samples_leaf": 20} | 4.891 | 1.364 | 1.442 | 2.566
+Chosen: persistence {} (mean MAE 1.394); ridge {"alpha": 0.01} (mean MAE 0.458); forest {"max_depth": 5, "min_samples_leaf": 5} (mean MAE 1.952)
+
