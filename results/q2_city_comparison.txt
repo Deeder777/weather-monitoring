@@ -1,0 +1,46 @@
+Question 2: Tashkent vs Samarkand daytime temperature (exploratory; days are the unit)
+Settings: >= 6 matched hours per day, 10000 resamples, seed 2026
+
+Daily differences:
+  2026-11-02  8 h  +1.15 °C
+  2026-11-03  8 h  +1.31 °C
+  2026-11-04  8 h  +2.01 °C
+  2026-11-05  8 h  +0.27 °C
+  2026-11-06  8 h  +1.62 °C
+  2026-11-07  8 h  -1.21 °C
+  2026-11-08  8 h  -1.14 °C
+  2026-11-09  8 h  +1.20 °C
+  2026-11-10  8 h  +1.88 °C
+  2026-11-11  8 h  -0.03 °C
+  2026-11-12  8 h  -0.71 °C
+  2026-11-13  7 h  -2.33 °C
+  2026-11-14  7 h  -0.69 °C
+  2026-11-15  8 h  -0.36 °C
+  2026-11-16  8 h  -1.93 °C
+  2026-11-17  8 h  +1.05 °C
+  2026-11-18  8 h  -1.41 °C
+  2026-11-19  8 h  +0.21 °C
+  2026-11-20  8 h  +0.27 °C
+  2026-11-21  8 h  +1.01 °C
+
+== All qualifying days (primary): 20 days (2026-11-02 to 2026-11-21) ==
+Mean difference (Tashkent - Samarkand): +0.11 °C   SD 1.29   median +0.24
+Assumption checks (fixed in advance):
+  1. Shapiro-Wilk: W = 0.956, p = 0.465  -> normality not rejected at 0.05
+  2. Outliers (1.5 x IQR): 0
+  3. Lag-1 autocorrelation of daily differences: +0.20
+Paired t-test: t(19) = 0.38, p = 0.708, 95% CI [-0.50, +0.72] °C
+Wilcoxon signed-rank: W = 95.0, p = 0.709   (reported for reference)
+Block bootstrap, 1-day blocks (primary): 95% CI [-0.45, +0.66] °C
+Block bootstrap, 3-day blocks (robustness 1): 95% CI [-0.62, +0.66] °C
+
+== Complete days only (robustness 2): 17 days (2026-11-02 to 2026-11-21) ==
+Mean difference (Tashkent - Samarkand): +0.39 °C   SD 1.16   median +0.27
+Assumption checks (fixed in advance):
+  1. Shapiro-Wilk: W = 0.951, p = 0.471  -> normality not rejected at 0.05
+  2. Outliers (1.5 x IQR): 0
+  3. Lag-1 autocorrelation of daily differences: +0.14
+Paired t-test: t(16) = 1.38, p = 0.185, 95% CI [-0.21, +0.99] °C
+Wilcoxon signed-rank: W = 49.0, p = 0.193   (reported for reference)
+Block bootstrap, 1-day blocks (primary): 95% CI [-0.15, +0.90] °C
+Block bootstrap, 3-day blocks (robustness 1): 95% CI [-0.28, +0.89] °C
