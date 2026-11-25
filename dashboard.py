@@ -6,6 +6,7 @@ offline snapshot data/weather_snapshot.sqlite. The optional live check fetches c
 from Open-Meteo for display only: it never writes to any database.
 """
 import json
+from contextlib import closing
 import sqlite3
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -36,7 +37,7 @@ def database_path():
 
 @st.cache_data
 def load_readings(path):
-    with sqlite3.connect(path) as db:
+    with closing(sqlite3.connect(path)) as db:
         df = pd.read_sql_query("SELECT city, source_utc, temp_c, humidity_pct, wind_kmh, pressure_hpa "
                                "FROM weather_readings", db)
     df["time"] = pd.to_datetime(df["source_utc"].str.rstrip("Z")) + pd.Timedelta(hours=5)
@@ -46,7 +47,7 @@ def load_readings(path):
 
 @st.cache_data
 def run_query(path, number):
-    with sqlite3.connect(path) as db:
+    with closing(sqlite3.connect(path)) as db:
         names, rows = queries.run(db, number)
     return pd.DataFrame(rows, columns=names)
 
@@ -57,7 +58,7 @@ def deployment_model(path):
     Used only for the next-hour estimate; the reported evaluation is the one-time test in results/."""
     selection = json.loads(models.SELECTION.read_text(encoding="utf-8"))
     setting = selection["chosen"]["full"]["ridge"]["setting"]
-    with sqlite3.connect(path) as db:
+    with closing(sqlite3.connect(path)) as db:
         pairs = models.load_pairs(db)
     model = models.make_model("ridge", setting)
     model.fit(models.features(pairs, "full"), models.target(pairs))
@@ -204,22 +205,38 @@ with nexthour:
                        delta=f"{value - r['temp_c']:+.1f} °C vs {when:%H:%M}", delta_color="off")
             col.caption(f"Now {r['temp_c']:.1f} °C · persistence {r['temp_c']:.1f} °C · "
                         + (f"actual {actual['temp_c'].iloc[0]:.1f} °C" if not actual.empty else "no later reading"))
-        st.subheader("Live check (needs internet, nothing is saved)")
-        if st.button("Fetch current conditions from Open-Meteo"):
-            for city in CITIES:
-                try:
-                    stamp, t, h, w, p = weather.parse(weather.fetch(weather.request_url(city)))
-                except Exception as exc:                       # network or validation problem
-                    st.error(f"{city}: {exc}")
+        st.subheader("Collect a new record now (needs internet)")
+        st.caption("Runs the same collector, validation and storage code as the assessed collection, but saves to "
+                   "`post_collection.sqlite`. These records are never part of the assessed 1–21 Nov dataset or results.")
+        if st.button("Collect, save and estimate"):
+            with weather.connect(weather.CHECK_DB) as cdb:
+                statuses = weather.check_batch(cdb)
+                rows = pd.read_sql_query(
+                    "SELECT w.city, w.source_utc, w.temp_c, w.humidity_pct, w.wind_kmh, w.pressure_hpa, r.collected_utc "
+                    "FROM weather_readings w JOIN collection_runs r ON r.id = w.run_id "
+                    "WHERE w.source_utc = (SELECT max(source_utc) FROM weather_readings WHERE city = w.city)", cdb)
+            cdb.close()
+            for city, status in statuses.items():
+                if status == "error":
+                    st.error(f"{city}: collection failed (logged in collection_runs). Check the internet connection.")
                     continue
-                local = datetime.strptime(stamp, "%Y-%m-%dT%H:%MZ") + timedelta(hours=5)
-                if local.hour not in models.INPUT_HOURS:
-                    st.write(f"**{city}**: {t:.1f} °C at {local:%H:%M} — outside the 08:00–14:00 model window.")
+                row = rows[rows["city"] == city]
+                if row.empty:
                     continue
-                value = estimate(model, dict(city=city, hour=local.hour, temp_c=t, humidity_pct=h,
-                                             wind_kmh=w, pressure_hpa=p), None)
-                st.write(f"**{city}**: {t:.1f} °C at {local:%H:%M} → estimate **{value:.1f} °C** "
-                         f"at {local + timedelta(hours=1):%H:%M} (previous hour not stored, so change = 0).")
+                r = row.iloc[0]
+                local = datetime.strptime(r["source_utc"], "%Y-%m-%dT%H:%MZ") + timedelta(hours=5)
+                line = (f"**{city}** ({status}): {r['temp_c']:.1f} °C at {local:%d %b %H:%M} Tashkent, "
+                        f"retrieved {r['collected_utc']}")
+                if local.hour in models.INPUT_HOURS:
+                    value = estimate(model, dict(city=city, hour=local.hour, temp_c=r["temp_c"],
+                                                 humidity_pct=r["humidity_pct"], wind_kmh=r["wind_kmh"],
+                                                 pressure_hpa=r["pressure_hpa"]), None)
+                    line += f" → estimate **{value:.1f} °C** at {local + timedelta(hours=1):%H:%M}"
+                else:
+                    line += " (outside the 08:00–14:00 model window, so no estimate)"
+                st.write(line)
+            st.caption("Saved → retrieved from the database → estimate. 'duplicate' means Open-Meteo has not published "
+                       "a newer 15-minute value since the last collection.")
         if test_report.exists():
             with st.expander("Model evaluation (Question 3, one-time test on 17–21 Nov)", expanded=True):
                 st.code(test_report.read_text(encoding="utf-8"), language=None)

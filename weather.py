@@ -16,6 +16,7 @@ ROOT = Path(__file__).resolve().parent
 CITIES = {"Tashkent": (41.31, 69.28), "Samarkand": (39.65, 66.96), "Bukhara": (39.77, 64.42)}
 UNITS = {"temperature_2m": "°C", "relative_humidity_2m": "%", "wind_speed_10m": "km/h", "surface_pressure": "hPa"}
 API = "https://api.open-meteo.com/v1/forecast"
+CHECK_DB = ROOT / "post_collection.sqlite"   # new records collected after the assessed window; never analysed
 
 # Assessed collection window (approved plan). Uzbekistan uses UTC+5 all year (no daylight saving),
 # so a fixed offset is exact and needs no extra package on Windows.
@@ -147,6 +148,13 @@ def run_live(db, now, getter=fetch, pause=time.sleep):
             results[city] = collect(db, city, getter=getter, pause=pause)
     return results
 
+def check_batch(db, getter=None, pause=time.sleep):
+    """Collect one live batch at any time, for demonstration and verification after the assessed
+    window. Same validation, provenance and storage code as assessed collection, but the caller must
+    pass a separate database (post_collection.sqlite) so these records never join the analysed data."""
+    getter = getter or fetch
+    return {city: collect(db, city, getter=getter, pause=pause) for city in CITIES}
+
 def show(db):
     print("City | Source time (UTC) | Temp (C) | Humidity (%) | Wind (km/h) | Pressure (hPa)")
     for row in db.execute("SELECT city,source_utc,temp_c,humidity_pct,wind_kmh,pressure_hpa FROM weather_readings ORDER BY source_utc DESC,city LIMIT 12"):
@@ -154,21 +162,26 @@ def show(db):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("action",choices=["demo","live","show-demo","show-live"])
+    parser.add_argument("action",choices=["demo","live","check","show-demo","show-live","show-check"],
+        help="demo: synthetic examples; live: assessed collection (1-21 Nov 2026 only); "
+             "check: collect a new live record now into post_collection.sqlite (not analysed)")
     args = parser.parse_args()
     demo = "demo" in args.action
+    check = "check" in args.action
     if args.action == "live":
         problem = window_problem(datetime.now(timezone.utc))
         if problem:
             print("No live collection: " + problem)
             return 0
-    db = connect(ROOT / ("demo.sqlite" if demo else "weather.sqlite"))
+    db = connect(ROOT / "demo.sqlite" if demo else CHECK_DB if check else ROOT / "weather.sqlite")
     try:
         failed = False
         if args.action == "demo":
             results = {city: collect(db,city,True) for city in CITIES}
         elif args.action == "live":
             results = run_live(db, datetime.now(timezone.utc))
+        elif args.action == "check":
+            results = check_batch(db)
         else:
             results = {}
         for city, status in results.items():
@@ -176,7 +189,9 @@ def main():
             if status == "error":
                 failed = True
                 print(db.execute("SELECT error FROM collection_runs WHERE city=? ORDER BY id DESC LIMIT 1",(city,)).fetchone()[0], file=sys.stderr)
-        print("DEMO / synthetic readings" if demo else "Live collection / Open-Meteo")
+        print("DEMO / synthetic readings" if demo else
+              "Post-collection check / Open-Meteo (post_collection.sqlite, not part of the assessed data)" if check else
+              "Live collection / Open-Meteo")
         show(db)
         return int(failed)
     finally:

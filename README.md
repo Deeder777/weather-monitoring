@@ -44,13 +44,14 @@ once and for fresh API data.
 
 `data/weather_snapshot.sqlite` is a copy of the final live database (see *Offline snapshot* below).
 `weather.sqlite` is ignored by Git, so the copy is never committed. The dashboard also opens the snapshot
-directly if `weather.sqlite` is missing.
+directly if `weather.sqlite` is missing. Database initialisation is automatic: `weather.connect()` creates
+any missing table (schema in `weather.py`, `SCHEMA`), so no separate set-up script is needed.
 
 ## Commands
 
 | Command | What it does |
 |---|---|
-| `py -3.13 -m unittest -v` | 14 automated tests (collector, queries, statistics, models, dashboard) |
+| `py -3.13 -m unittest -v` | 16 automated tests (collector, queries, statistics, models, dashboard, end-to-end) |
 | `py -3.13 queries.py` | the five planned database queries (`queries.py 3` for one) |
 | `py -3.13 check_progress.py` | records, days and pairs against the targets, per day |
 | `py -3.13 list_gaps.py` | every missing on-the-hour slot and every off-the-hour reading |
@@ -60,10 +61,38 @@ directly if `weather.sqlite` is missing.
 | `py -3.13 models.py test` | one-time test on 17–21 Nov; refuses to run until the selection is committed |
 | `py -3.13 -m streamlit run dashboard.py` | local dashboard at http://localhost:8501 |
 | `py -3.13 weather.py demo` / `show-demo` | three synthetic examples in `demo.sqlite` (never used in analysis) |
-| `py -3.13 weather.py live` / `show-live` | one live batch; refuses outside the approved collection window |
+| `py -3.13 weather.py live` / `show-live` | one assessed live batch; refuses outside the approved window (1–21 Nov 2026) |
+| `py -3.13 weather.py check` / `show-check` | collect a new live record **now** into `post_collection.sqlite` (needs internet; never analysed) |
 
 Re-running `models.py test` gives the same numbers (fixed seed 2026) and adds another row to
 `results/model_runs.sqlite`; the reported evaluation is the first run, commit `65824be`.
+
+## Collect a new record now (verification after the collection window)
+
+Assessed collection ended on 21 Nov 2026, so `weather.py live` now refuses to run. To check that the
+system still collects, validates, saves and retrieves a genuine new record, use the check mode:
+
+    py -3.13 weather.py check
+    py -3.13 weather.py show-check
+
+It uses the same request, validation, provenance (`collection_runs`, `raw_responses`) and storage code, but
+writes to `post_collection.sqlite`, which is ignored by Git and never used in the analysis. Running it twice
+within 15 minutes reports `duplicate`, because Open-Meteo publishes a new current value every 15 minutes.
+In the dashboard, **Next-hour estimate → Collect, save and estimate** does the same and shows the
+next-hour estimate for the new reading. `test_end_to_end.py` tests this path without internet.
+
+## Checkpoints
+
+| Checkpoint | Tag | Commit |
+|---|---|---|
+| 1 – Data collection MVP | `cp1` | `55e30b385917d1cabbbd89befaf5e4f2c180d9ca` |
+| 2 – Reliable collection, quality and queries | `cp2` | `415369fd8d715fd6c4c6916c0409cf5e20b50f30` |
+| 3 – Statistical analysis and models | `cp3` | `65824bec246cf0e5c9fc7064869c2745863ddf32` |
+| 4 – Integrated system | `cp4` | `272dcada08f0117899b88781be7c200193553244` |
+
+Evidence register, value statements and test specifications: `docs/checkpoints.md`.
+Decision and defect records: `docs/decisions.md`. Dated AI-use record: `docs/ai_log.md` and
+`docs/development_log.md`.
 
 ## Repository layout
 
@@ -74,11 +103,14 @@ Re-running `models.py test` gives the same numbers (fixed seed 2026) and adds an
     models.py             Question 3 (select / test)
     dashboard.py          Streamlit dashboard
     check_progress.py, list_gaps.py   collection checks
-    test_*.py             automated tests
+    test_*.py             automated tests (synthetic fixtures only, never used in the analysis)
     .github/workflows/collect.yml     GitHub Actions collector
     data/weather_snapshot.sqlite      offline copy of the final live database
     docs/analysis_plan.md fixed before analysis (with Amendment 1)
     docs/approval.md      approval and how each clarification was implemented
+    docs/checkpoints.md   checkpoint evidence register and test specifications
+    docs/decisions.md     decision and defect records
+    docs/ai_log.md        dated representative AI prompts and outputs
     results/              text results, model settings, model_runs table
     charts/               PNG charts for the report
 
@@ -143,6 +175,7 @@ forward validation windows and committed (`ec378ad`) before the final five days 
 | Question 3 settings committed | `ec378ad` |
 | Question 3 one-time test | `65824be` |
 | Dashboard | `26269e3` |
+| Snapshot, README, approval notes | `272dcad` |
 
 ## Limitations
 
